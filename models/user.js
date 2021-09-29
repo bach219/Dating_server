@@ -1,7 +1,6 @@
 var mongoose = require('mongoose');
-const jwt = require('jsonwebtoken');
+
 const bcrypt = require('bcrypt');
-const confiq = require('../config/config').get(process.env.NODE_ENV);
 const salt = 10;
 
 var Schema = mongoose.Schema;
@@ -10,7 +9,7 @@ var UserSchema = new Schema({
   name: { type: String },
   email: { type: String },
   password: { type: String },
-  gender: { type: String, enum: ['Nam', 'Nữ'], default: 'Nam' },
+  sex: { type: String, enum: ['Nam', 'Nữ'], default: 'Nam' },
   birth: { type: Date },
   job: { type: String },
   company: { type: String },
@@ -21,14 +20,40 @@ var UserSchema = new Schema({
   weight: { type: String },
   literacy: { type: String },
   description: { type: String },
+  bio: { type: String },
+  country: { type: String },
 
-
-  interestGender: { type: String },
+  interests: [String],
+  preferSex: { type: String },
   interestDistance: { type: String },
   interestAge: { type: String },
   interestHeight: { type: String },
   interestWeight: { type: String },
   interestLiteracy: { type: String },
+
+
+
+  alertMatch: { type: Boolean, default: true },
+  alertMessage: { type: Boolean, default: true },
+  alertLiked: { type: Boolean, default: true },
+  displayAge: { type: Boolean, default: true },
+  displayDistance: { type: Boolean, default: true },
+
+
+  // user fire base token in app
+  fcm_key: { type: String, default: null, trim: true },
+  // check if user blocked or not
+  blocked: { type: Boolean, default: false },
+  //mobile device name of user
+  device_model: { type: String, trim: true, default: null },
+  //user profile picture
+  avatar: { type: String, default: 'user.png', trim: true },
+  //get the last time that user was online
+  last_seen: { type: Number, required: true, default: new Date().getTime() },
+  // timestamp
+  updated_at: { type: Number, required: true, default: new Date().getTime() },
+  // timestamp
+  created_at: { type: Number, required: true, default: new Date().getTime() },
 
 });
 
@@ -62,40 +87,5 @@ UserSchema.methods.comparepassword = function (password, cb) {
   });
 }
 
-// generate token
-
-UserSchema.methods.generateToken = function (cb) {
-  var user = this;
-  var token = jwt.sign(user._id.toHexString(), confiq.SECRET);
-
-  user.token = token;
-  user.save(function (err, user) {
-    if (err) return cb(err);
-    cb(null, user);
-  })
-}
-
-// find by token
-UserSchema.statics.findByToken = function (token, cb) {
-  var user = this;
-
-  jwt.verify(token, confiq.SECRET, function (err, decode) {
-    user.findOne({ "_id": decode, "token": token }, function (err, user) {
-      if (err) return cb(err);
-      cb(null, user);
-    })
-  })
-};
-
-//delete token
-
-UserSchema.methods.deleteToken = function (token, cb) {
-  var user = this;
-
-  user.update({ $unset: { token: 1 } }, function (err, user) {
-    if (err) return cb(err);
-    cb(null, user);
-  })
-}
 // Export model.
 module.exports = mongoose.model('User', UserSchema);

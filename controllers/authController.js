@@ -1,24 +1,26 @@
-var async = require('async')
 var User = require('../models/user')
+const db = require('../config/config').get();
+const redis_client = require('../config/redis_connect');
+const jwt = require('jsonwebtoken');
+const _ = require('lodash')
+const response = require('../config/response')
 
 const { validationResult } = require("express-validator");
 
-function getInfo(req, res) {
-  User.findOne({ 'email': req.body.email }, function (err, user) {
-    if (!user) return res.json({ message: 'Địa chỉ Email không tồn tại' });
+function getInfo(body, res) {
+  User.findOne({ 'email': body.email }, function (err, user) {
+    if (!user) return res.status(response.STATUS_UNAUTHORIZED).json(response.createResponse(response.FAILED, 'Địa chỉ Email không tồn tại'));
 
-    user.comparepassword(req.body.password, (err, isMatch) => {
-      if (!isMatch) return res.json({ message: "Mật khẩu không chính xác" });
+    user.comparepassword(body.password, (err, isMatch) => {
+      if (!isMatch) return res.status(response.STATUS_UNAUTHORIZED).json(
+        response.createResponse(response.FAILED, 'Mật khẩu không chính xác')
+      );
 
-      user.generateToken((err, user) => {
-        if (err) return res.status(400).send(err);
-        res.cookie('auth', user.token);
-        return res.json({
-          id: user._id,
-          email: user.email,
-          token: user.token
-        });
-      });
+      const access_token = jwt.sign({ sub: user._id }, db.JWT_ACCESS_SECRET, { expiresIn: db.JWT_ACCESS_TIME });
+      console.log('access_token', access_token);
+      return res.status(response.STATUS_OK).json(
+        response.createResponse(response.SUCCESS, `Thành công`, { user: user, token: access_token })
+      );
     });
   });
 }
@@ -30,35 +32,38 @@ exports.register = function (req, res) {
     const errors = validationResult(req);
 
     if (!errors.isEmpty()) {
-      return res.status(400).json({
-        error: errors.array()[0].msg
-      });
+      return res.status(response.STATUS_UNPROCESSABLE_ENTITY).json(
+        response.createResponse(response.FAILED, errors.array()[0].msg)
+      );
     }
     else {
-      User.findOne({ email: req.body.email }, function (err, user) {
-        if (user) return res.status(400).json({ message: "Địa chỉ Email đã tồn tại" });
+      let body = _.pick(req.body, ['email', 'password', 'name', 'passwordConfirm']);
+      User.findOne({ email: body.email }, function (err, user) {
+        if (user) return res.status(response.STATUS_CONFLICT).json(
+          response.createResponse(response.FAILED, 'Địa chỉ Email đã tồn tại')
+        );
 
         // Data from form is valid.
         // Create Author object with escaped and trimmed data
-        var newuser = new User(req.body);
+        var newuser = new User(body);
         // Save author.
         newuser.save(function (err, doc) {
           if (err) {
             console.log(err);
-            return res.status(400).json({ message: "Đã xảy ra lỗi" });
+            return res.status(response.STATUS_NOT_FOUND).json(
+              response.createResponse(response.ERROR, 'Đã xảy ra lỗi: ' + err)
+            );
           }
 
-          return getInfo(req, res);
+          return getInfo(body, res);
         });
       });
 
     }
   } catch (error) {
-    return res.status(400).json({
-      error: {
-        message: error
-      }
-    });
+    return res.status(response.STATUS_NOT_FOUND).json(
+      response.createResponse(response.FAILED, 'Đã xảy ra lỗi: ' + err)
+    );
   }
 }
 
@@ -69,50 +74,66 @@ exports.login = function (req, res) {
     const errors = validationResult(req);
 
     if (!errors.isEmpty()) {
-      return res.status(400).json({
-        error: errors.array()[0].msg
-      });
+      return res.status(response.STATUS_UNPROCESSABLE_ENTITY).json(
+        response.createResponse(response.FAILED, errors.array()[0].msg)
+      );
     }
     else {
-      if (req.headers.authorization && req.headers.authorization.split(' ')[0] === 'Bearer') {
-        let token = req.headers.authorization.split(' ')[1];
-        User.findByToken(token, (err, user) => {
-          if (err) return res(err);
-          if (user) return res.status(400).json({
-            message: "Bạn đã đăng nhập"
-          });
-          else
-            return getInfo(req, res);
-
-        });
-      }
+      let body = _.pick(req.body, ['email', 'password']);
+      getInfo(body, res);
     }
-  } catch (error) {
-    return res.status(400).json({
-      error: {
-        message: error
-      }
-    });
+  } catch (err) {
+    return res.status(response.STATUS_NOT_FOUND).json(
+      response.createResponse(response.FAILED, 'Đã xảy ra lỗi: ' + err)
+    );
   }
 }
 
 
 exports.logout = function (req, res) {
   try {
-    // Extract the validation errors from a request.
-    req.user.deleteToken(req.token, (err, user) => {
-      if (err) return res.status(400).send(err);
-      res.sendStatus(200).json({
-        message: "Đăng xuất thành công"
-      });
-    });
+    const user_id = req.userData.sub;
+    const token = req.token;
+
+    // remove the refresh token
+    redis_client.del(user_id.toString());
+
+    // blacklist current access token
+    redis_client.set('BL_' + user_id.toString(), token);
+
+    return res.status(response.STATUS_OK).json(
+      response.createResponse(response.SUCCESS, "Đăng xuất thành công.")
+    );
   } catch (error) {
-    return res.status(400).json({
-      error: {
-        message: error
-      }
-    });
+    return res.status(response.STATUS_NOT_FOUND).json(
+      response.createResponse(response.FAILED, 'Đã xảy ra lỗi: ' + err)
+    );
   }
+}
+
+exports.getAccessToken = function (req, res) {
+  const user_id = req.userData.sub;
+  const access_token = jwt.sign({ sub: user_id }, db.JWT_ACCESS_SECRET, { expiresIn: db.JWT_ACCESS_TIME });
+  return res.status(response.STATUS_OK).json(
+    response.createResponse(response.SUCCESS, `Thành công`, { token: access_token })
+  );
+}
+
+function GenerateRefreshToken(user_id) {
+  const refresh_token = jwt.sign({ sub: user_id }, db.JWT_REFRESH_SECRET, { expiresIn: db.JWT_REFRESH_TIME });
+
+  redis_client.get(user_id.toString(), (err, data) => {
+    if (err)
+      return res.status(response.STATUS_NOT_FOUND).json({
+        error: {
+          message: error
+        }
+      });
+
+    redis_client.set(user_id.toString(), JSON.stringify({ token: refresh_token }));
+  })
+
+  return refresh_token;
 }
 
 

@@ -3,7 +3,9 @@ var mongoose = require('mongoose');
 var Schema = mongoose.Schema;
 
 var MatchSchema = new Schema({
-  user: { type: Schema.ObjectId, ref: 'User', required: true },
+  user: { type: Schema.ObjectId, ref: 'User' },
+  match: { type: Boolean, default: false },
+  owner: { type: Schema.ObjectId, ref: 'User' },
 });
 
 

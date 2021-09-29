@@ -3,8 +3,9 @@ var mongoose = require('mongoose');
 var Schema = mongoose.Schema;
 
 var PhotoSchema = new Schema({
-  url: { type: String, required: true },
-  user: { type: Schema.ObjectId, ref: 'User', required: true },
+  name: { type: String },
+  sort: { type: Number },
+  user: { type: Schema.ObjectId, ref: 'User' },
 });
 
 
